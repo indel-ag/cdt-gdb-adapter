@@ -783,7 +783,7 @@ export class GDBTargetDebugSession extends GDBDebugSession {
             );
             // Connection completed, announce the adapter is ready for
             // other protocol commands.
-            this.sendInitializedEvent();
+            await this.sendInitializedEvent();
             this.sendResponse(response);
             await this.setSessionState(SessionState.SESSION_READY);
         } catch (err) {

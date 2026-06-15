@@ -158,6 +158,10 @@ export abstract class GDBDebugSessionBase extends LoggingDebugSession {
     // When uncertain because we have not received the status of the newest
     // threads yet, this is the last certain value.
     protected isRunning = false;
+    // undefined when isRunning is certain, a promise that resolves when it becomes certain otherwise
+    protected isRunningConfirmation: Promise<void> | undefined = undefined;
+    // resolve function of isRunningConfirmation
+    private isRunningConfirmationResolve: (() => void) | undefined = undefined;
 
     protected supportsRunInTerminalRequest = false;
     protected supportsMemoryReferences = false;
@@ -582,11 +586,12 @@ export abstract class GDBDebugSessionBase extends LoggingDebugSession {
                 });
             }
         }
-        this.sendInitializedEvent();
+        await this.sendInitializedEvent();
         this.sendResponse(response);
     }
 
-    protected sendInitializedEvent() {
+    protected async sendInitializedEvent() {
+        await this.isRunningConfirmation;
         if (this.isRunning) {
             this.configuringState = ConfiguringState.CONFIGURING;
         } else {
@@ -668,11 +673,12 @@ export abstract class GDBDebugSessionBase extends LoggingDebugSession {
         // configurationDoneRequest.
         if (this.configuringState === ConfiguringState.CONFIGURING) {
             this.configuringState = ConfiguringState.CONFIGURING_PAUSED;
-            this.pauseIfNeeded(); // no need to await
+            await this.pauseIfNeeded();
         }
 
         this.pauseCount++;
         if (this.pauseCount === 1) {
+            await this.isRunningConfirmation;
             this.waitPausedNeeded =
                 this.isRunning && (!requireAsync || this.gdb.getAsyncMode());
             if (this.waitPausedNeeded) {
@@ -3165,8 +3171,21 @@ export abstract class GDBDebugSessionBase extends LoggingDebugSession {
               : this.threads.some((t) => t.running === true); // have running
         if (newIsRunning !== undefined) {
             this.isRunning = newIsRunning;
+            if (this.isRunningConfirmationResolve !== undefined) {
+                // isRunning has become certain
+                this.isRunningConfirmationResolve();
+                this.isRunningConfirmation = undefined;
+                this.isRunningConfirmationResolve = undefined;
+            }
+        } else {
+            // leave this.isRunning at its previous known value
+            if (this.isRunningConfirmation === undefined) {
+                // isRunning has become uncertain
+                this.isRunningConfirmation = new Promise((resolve) => {
+                    this.isRunningConfirmationResolve = resolve;
+                });
+            }
         }
-        // else leave this.isRunning at its previous known value
     }
 
     protected handleGDBAsync(resultClass: string, resultData: any) {
